@@ -163,10 +163,13 @@ def OutputTable(output_tables, output_cols, cols_needed, output_cond, cond_op, g
 
     # execute group by clause
     if groupby_dict['groupby_table']:
-        clause = True
         aggr_cols = groupby_dict['aggr_cols']
         seen = {}
-        inter_table = final_table.copy()
+        if clause:
+            temp_table = final_table.copy()
+        else:
+            temp_table = inter_table.copy()
+        clause = True
         final_table = []
         proj_col_idx = None
         def find_proj_idx(proj_col_idx):
@@ -185,7 +188,7 @@ def OutputTable(output_tables, output_cols, cols_needed, output_cond, cond_op, g
                 rows = []
                 if cname == groupby_dict['proj_col']:
                     continue
-                for i, row in enumerate(inter_table):
+                for i, row in enumerate(temp_table):
                     val = row[proj_col_idx]  
                     if val not in seen.keys():
                         seen[val] = {} 
@@ -250,7 +253,11 @@ def OutputTable(output_tables, output_cols, cols_needed, output_cond, cond_op, g
         final_table[0] = aggr_outs.copy()
     # execute distinct clause
     if is_dist:
-        temp_table = final_table.copy()
+        if clause:
+            temp_table = final_table.copy()
+        else:
+            temp_table = inter_table.copy()
+        clause = True
         final_table = []
         for row_idx, row in enumerate(temp_table):
             rows = []
@@ -265,6 +272,7 @@ def OutputTable(output_tables, output_cols, cols_needed, output_cond, cond_op, g
         col_order_idx = None
         if not clause:
             final_table = inter_table.copy()
+        clause = True
         def find_orderby_idx(col_order_idx):
             for j, (t_name, c_name, aggr) in enumerate(output_cols):
                 for k, cname in enumerate(c_name):
