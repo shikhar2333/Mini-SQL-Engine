@@ -116,7 +116,7 @@ def OutputTable(output_tables, output_cols, cols_needed, output_cond, cond_op, g
         cross_join_idx[table] = {c_name: count+i for i, c_name in enumerate(cols_needed[table])}
         count = count + len(cols_needed[table])
 
-    # Cartesain product of the tables
+    # Cartesain product of the tables i.e from clause
     inter_table = [[i for tup in r for i in tup] for r in itertools.product(*tables_needed)]
     final_table = []
     clause = False
@@ -147,7 +147,6 @@ def OutputTable(output_tables, output_cols, cols_needed, output_cond, cond_op, g
             for i in range(len(inter_table)):
                 take_cols[i][0] = take_cols[i][0] or take_cols[i][1]
 
-         
         for i,row in enumerate(inter_table):
             if not take_cols[i][0]:
                 continue
@@ -155,11 +154,9 @@ def OutputTable(output_tables, output_cols, cols_needed, output_cond, cond_op, g
             for j, (t_name, c_name, _) in enumerate(output_cols):
                 n = len(t_name)
                 for k in range(n):
-                    # idx = cross_join_idx[t_name[k]][c_name[k]]
-                    choose_cols += [inter_table[i][j]]
+                    idx = cross_join_idx[t_name[k]][c_name[k]]
+                    choose_cols += [inter_table[i][idx]]
             final_table.append(choose_cols)           
-        # for t in final_table:
-        #     print(t)
 
     # execute group by clause
     if groupby_dict['groupby_table']:
@@ -217,13 +214,12 @@ def OutputTable(output_tables, output_cols, cols_needed, output_cond, cond_op, g
                     elif aggr == "count":
                         rows += [len(temp)]
                     else:
-                        # print(aggr)
                         raise_error("Aggregrate function is invalid")
                 
                 final_table.append(rows)
         
         dict_helper()
-
+    
     aggr_list = [a for _, _, a in output_cols]
     # execute simple aggregrate functions
     if _all(aggr_list):
@@ -251,7 +247,8 @@ def OutputTable(output_tables, output_cols, cols_needed, output_cond, cond_op, g
                 raise_error("Invalid aggregrate function")
         final_table = [[]]
         final_table[0] = aggr_outs.copy()
-    # execute distinct clause
+    
+    # execute distinct clause  
     if is_dist:
         if clause:
             temp_table = final_table.copy()
@@ -297,13 +294,13 @@ def OutputTable(output_tables, output_cols, cols_needed, output_cond, cond_op, g
     for j, (t_name, c_name, aggr) in enumerate(output_cols):
         for k, cname in enumerate(c_name):
             if aggr:
-                col_names.append(aggr + '(' + cname + ')')
+                col_names.append(aggr + '(' + t_name[k] + '.' + cname + ')')
             else:
                 col_names.append(t_name[k] + '.' + cname)
     # print(col_names)
     return final_table, col_names
 
-def OrderByParser(orderby_col, cols_list):
+def OrderByParser(orderby_col, output_cols):
     if orderby_col == []:
         return [None]
     f = True
@@ -312,17 +309,15 @@ def OrderByParser(orderby_col, cols_list):
     AssertCond(len(orderby_col) == 1, "Missing asc/desc option in order by clause")
     if regmatch:
         aggr_func, col_ord = regmatch.groups()
-    for col in cols_list:
-        regmatch = re.match("(.+)\((.+)\)", col)
-        if regmatch:
-            aggr_func, col = regmatch.groups()
+    for i, (t_name, c_name, aggr) in enumerate(output_cols):
+        col = c_name[0]
         if col == col_ord:
             f = False
             break
     AssertCond(f, "No projection column found corresponding to the given order by column")
     return [col_ord, orderby_col[1]]
     
-def GroupByParser(groupby_list, tables_list, cols_list):
+def GroupByParser(groupby_list, tables_list, output_cols):
     if groupby_list == []:
         return None, None
     col_to_grp = groupby_list[1]
@@ -333,20 +328,17 @@ def GroupByParser(groupby_list, tables_list, cols_list):
             groupby_table = table
             break
     AssertCond(groupby_table == None, "No matching table for the given group by column")
-    for col in cols_list:
+    for j, (t_name, c_name, aggr) in enumerate(output_cols):
+        col = c_name[0]
         if col_to_grp == col:
             flag = False
             break
     AssertCond(flag, "No projection column found corresponding to the given group by column")
     flag = True
     aggr_cols = []
-    for col in cols_list:
-        regmatch = re.match("(.+)\((.+)\)", col)
-        if regmatch:
-            aggr_func, col = regmatch.groups()
-        else:
-            aggr_func = None
-        if aggr_func:
+    for j, (t_name, c_name, aggr) in enumerate(output_cols):
+        col = c_name[0]
+        if aggr:
             aggr_cols += [col]
     AssertCond(len(aggr_cols)==0, "No aggregrate function found for the group by clause")
     
@@ -574,8 +566,8 @@ def main():
                     continue
                 cols_needed[table].append(val)
 
-    groupby_table, aggr_cols = GroupByParser(p[3], tables_list, cols_list)
-    orderby_col = OrderByParser(p[4], cols_list)
+    groupby_table, aggr_cols = GroupByParser(p[3], tables_list, output_cols)
+    orderby_col = OrderByParser(p[4], output_cols)
     groupby_dict = {}
     groupby_dict['groupby_table'] = None
     groupby_dict['aggr_cols'] = None

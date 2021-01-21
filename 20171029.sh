@@ -1,0 +1,1 @@
+python3 mini_sql.py "${1}"
