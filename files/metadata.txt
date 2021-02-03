@@ -9,9 +9,3 @@ table2
 D
 E
 <end_table>
-<begin_table>
-table3
-F
-G
-H
-<end_table>

@@ -117,8 +117,7 @@ def OutputTable(output_tables, output_cols, cols_needed, output_cond, cond_op, g
         count = count + len(cols_needed[table])
 
     # Cartesain product of the tables i.e from clause
-    inter_table = [[i for tup in r for i in tup] for r in itertools.product(*tables_needed)]
-    final_table = []
+    inter_table = [[i for tup in r for i in list(tup)] for r in itertools.product(*tables_needed)]
     clause = False
 
     # execute where clause
@@ -147,87 +146,81 @@ def OutputTable(output_tables, output_cols, cols_needed, output_cond, cond_op, g
             for i in range(len(inter_table)):
                 take_cols[i][0] = take_cols[i][0] or take_cols[i][1]
 
-        for i,row in enumerate(inter_table):
+        temp_table = inter_table.copy()
+        inter_table = []
+        for i,row in enumerate(temp_table):
             if not take_cols[i][0]:
                 continue
-            choose_cols = []
-            for j, (t_name, c_name, _) in enumerate(output_cols):
-                n = len(t_name)
-                for k in range(n):
-                    idx = cross_join_idx[t_name[k]][c_name[k]]
-                    choose_cols += [inter_table[i][idx]]
-            final_table.append(choose_cols)           
+            inter_table.append(row)       
 
+    temp_table = inter_table.copy()
+    final_table = []
+    select_index = []
+    for t_name, c_name, _ in output_cols:
+        idx = cross_join_idx[t_name[0]][c_name[0]]
+        select_index.append(idx)
+
+    for i, row in enumerate(temp_table):
+        rows = []
+        for col_idx in select_index:
+            rows += [row[col_idx]]
+        final_table.append(rows) 
+       
     # execute group by clause
     if groupby_dict['groupby_table']:
-        aggr_cols = groupby_dict['aggr_cols']
         seen = {}
-        if clause:
-            temp_table = final_table.copy()
-        else:
-            temp_table = inter_table.copy()
-        clause = True
-        final_table = []
+        temp_table = inter_table.copy()
+        inter_table = []
         proj_col_idx = None
         def find_proj_idx(proj_col_idx):
             for j, (t_name, c_name, aggr) in enumerate(output_cols):
                 for k, cname in enumerate(c_name):
                     if cname == groupby_dict['proj_col']:
-                        proj_col_idx = j
+                        proj_col_idx = cross_join_idx[t_name[k]][cname]
                         break
-                if proj_col_idx:
+                if proj_col_idx != None:
                     break
             return proj_col_idx
 
-        proj_col_idx = find_proj_idx(proj_col_idx)
-        for j, (t_name, c_name, aggr) in enumerate(output_cols):
-            for k, cname in enumerate(c_name):
-                rows = []
-                if cname == groupby_dict['proj_col']:
-                    continue
-                for i, row in enumerate(temp_table):
-                    val = row[proj_col_idx]  
-                    if val not in seen.keys():
-                        seen[val] = {} 
-                    if cname not in seen[val].keys():
-                        seen[val][cname] = []
-
-                    seen[val][cname].append((row[j], aggr))
+        proj_col_idx = find_proj_idx(proj_col_idx)    
+        for i, row in enumerate(temp_table):
+            val = row[proj_col_idx]
+            if val not in seen.keys():
+                seen[val] = []
+            seen[val].append(i)
 
         def dict_helper():
-            for key, val in seen.items():
+            for key, index in seen.items():
                 rows = []
-                for key1, val1 in val.items():
-                    temp = [itr for itr, _ in val1]
-                    aggr = val1[0][1]
-                    # print(key1,temp)
-                    if len(rows) == proj_col_idx:
+                for j, (t_name, c_name, aggr) in enumerate(output_cols):
+                    if c_name[0] == groupby_dict['proj_col']:
                         rows += [key]
+                        continue
+                    col_idx = cross_join_idx[t_name[0]][c_name[0]]
+                    key_list = [temp_table[row_idx][col_idx] for row_idx in index]
                     if aggr == "min":
-                        rows += [min(temp)]
+                        aggr_func_val = min(key_list)
                     elif aggr == "max":
-                        rows += [max(temp)]
-                    elif aggr == "sum":
-                        rows += [sum(temp)]
-                    elif aggr == "average":
-                        rows += [sum(temp)/len(temp)]
+                        aggr_func_val = max(key_list)
                     elif aggr == "count":
-                        rows += [len(temp)]
+                        aggr_func_val = len(key_list)
+                    elif aggr == "average":
+                        aggr_func_val = sum(key_list)/len(key_list)
+                    elif aggr == "sum":
+                        aggr_func_val = sum(key_list)
                     else:
-                        raise_error("Aggregrate function is invalid")
-                
-                final_table.append(rows)
-        
-        dict_helper()
-    
+                        raise_error("Query is invalid")
+                    rows += [aggr_func_val]
+                inter_table.append(rows)
+            
+            return inter_table.copy()
+
+        final_table =  dict_helper()
+
     aggr_list = [a for _, _, a in output_cols]
     # execute simple aggregrate functions
     if _all(aggr_list):
-        if clause:
-            temp_table = final_table.copy()
-        else:
-            temp_table = inter_table.copy()
-        clause = True
+        temp_table = final_table.copy()   
         aggr_outs = []
         for idx, (t_name, c_name, aggr) in enumerate(output_cols):
             cols = []
@@ -250,11 +243,7 @@ def OutputTable(output_tables, output_cols, cols_needed, output_cond, cond_op, g
     
     # execute distinct clause  
     if is_dist:
-        if clause:
-            temp_table = final_table.copy()
-        else:
-            temp_table = inter_table.copy()
-        clause = True
+        temp_table = final_table.copy()
         final_table = []
         for row_idx, row in enumerate(temp_table):
             rows = []
@@ -267,8 +256,6 @@ def OutputTable(output_tables, output_cols, cols_needed, output_cond, cond_op, g
     if orderby_col[0]:
         orderby_table = None
         col_order_idx = None
-        if not clause:
-            final_table = inter_table.copy()
         clause = True
         def find_orderby_idx(col_order_idx):
             for j, (t_name, c_name, aggr) in enumerate(output_cols):
@@ -287,9 +274,9 @@ def OutputTable(output_tables, output_cols, cols_needed, output_cond, cond_op, g
         elif orderby_col[1] != "asc":
             raise_error("Invalid order by option: Use asc/desc")
 
-    if not clause:
-        final_table = inter_table.copy()
-    # print(final_table)
+
+    # for t in final_table:
+    #     print(t)
     col_names = []
     for j, (t_name, c_name, aggr) in enumerate(output_cols):
         for k, cname in enumerate(c_name):
@@ -297,7 +284,7 @@ def OutputTable(output_tables, output_cols, cols_needed, output_cond, cond_op, g
                 col_names.append(aggr + '(' + t_name[k] + '.' + cname + ')')
             else:
                 col_names.append(t_name[k] + '.' + cname)
-    # print(col_names)
+
     return final_table, col_names
 
 def OrderByParser(orderby_col, output_cols):
@@ -330,7 +317,7 @@ def GroupByParser(groupby_list, tables_list, output_cols):
     AssertCond(groupby_table == None, "No matching table for the given group by column")
     for j, (t_name, c_name, aggr) in enumerate(output_cols):
         col = c_name[0]
-        if col_to_grp == col:
+        if col_to_grp == col and aggr == None:
             flag = False
             break
     AssertCond(flag, "No projection column found corresponding to the given group by column")
@@ -553,19 +540,19 @@ def main():
     cols_list = "".join(p[1]).split(',')
     output_cols = ColoumnParser(tables_list, cols_list)
     output_cond, cond_op = CondParser(p[2], tables_list)
-    cols_needed = {t : [] for t in output_tables}
+    cols_needed = {t : set() for t in output_tables}
     for table, col, aggr in output_cols:
         for i in range(len(table)):
-            cols_needed[table[i]].append(col[i])
+            cols_needed[table[i]].add(col[i])
     
     for cond in output_cond:
         cond = cond[1:]
         for table, val in cond:
             if table != CONST:
-                if val in cols_needed[table]:
-                    continue
-                cols_needed[table].append(val)
+                cols_needed[table].add(val)
 
+    for table in output_tables:
+        cols_needed[table] = list(cols_needed[table])
     groupby_table, aggr_cols = GroupByParser(p[3], tables_list, output_cols)
     orderby_col = OrderByParser(p[4], output_cols)
     groupby_dict = {}
